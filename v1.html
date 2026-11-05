@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYP – Labyrinth-Flow (Wegwerf)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#14161b; --panel:#1c1f26; --line:#2b2f39; --text:#e6e8ee; --muted:#9aa1b2; --accent:#f2b84b; --ok:#5fd38d; --bad:#ff6b6b; --fly:#7cc7ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif; height:100vh; display:flex; flex-direction:column; }
+  header { padding:8px 16px; background:#2a1f0c; border-bottom:1px solid #5a4210; display:flex; gap:16px; align-items:baseline; }
+  header b { color:var(--accent); letter-spacing:.06em; }
+  header span { color:#d9c49a; font-size:13px; }
+  main { flex:1; display:flex; min-height:0; }
+  #board { flex:1; position:relative; display:flex; align-items:center; justify-content:center; min-width:0; padding:12px; }
+  canvas { display:block; border-radius:6px; box-shadow:0 0 0 1px var(--line); cursor:crosshair; }
+  #hover { position:absolute; left:16px; bottom:14px; background:rgba(20,22,27,.92); border:1px solid var(--line); padding:6px 10px; border-radius:6px; font-size:13px; pointer-events:none; min-height:30px; }
+  #banner { position:absolute; top:16px; left:50%; transform:translateX(-50%); background:rgba(20,22,27,.92); border:1px solid var(--accent); color:var(--accent); padding:8px 16px; border-radius:6px; font-weight:600; display:none; }
+  aside { width:360px; background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:12px 14px 40px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:16px 0 6px; }
+  .q { background:#22262f; border-left:3px solid var(--accent); padding:8px 10px; font-size:13px; color:#cfd3dc; }
+  .grid { display:grid; grid-template-columns: 1fr auto; gap:2px 10px; }
+  .grid div:nth-child(odd) { color:var(--muted); }
+  .grid div:nth-child(even) { text-align:right; font-variant-numeric:tabular-nums; }
+  .changed { color:var(--accent) !important; }
+  button { background:#2a2f3a; color:var(--text); border:1px solid #3a4050; border-radius:6px; padding:6px 10px; cursor:pointer; font:inherit; }
+  button:hover { background:#333948; }
+  button.on { background:var(--accent); color:#1a1405; border-color:var(--accent); font-weight:600; }
+  button.big { width:100%; padding:10px; font-weight:600; font-size:15px; background:#2f5a3e; border-color:#3f7a52; }
+  button.big:disabled { opacity:.45; cursor:default; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+  #last { min-height:38px; font-size:13px; padding:6px 8px; background:#22262f; border-radius:6px; }
+  #last.bad { color:var(--bad); } #last.ok { color:var(--ok); }
+  label { display:flex; align-items:center; gap:8px; font-size:13px; margin:3px 0; }
+  label input[type=number] { width:64px; background:#14161b; color:var(--text); border:1px solid var(--line); border-radius:4px; padding:3px 5px; }
+  input[type=text] { background:#14161b; color:var(--text); border:1px solid var(--line); border-radius:4px; padding:5px; width:110px; }
+  .scen { background:#22262f; border-radius:6px; padding:8px 10px; margin:6px 0; font-size:13px; }
+  .scen b { display:block; margin-bottom:3px; }
+  .small { font-size:12px; color:var(--muted); }
+  kbd { background:#2a2f3a; border:1px solid #3a4050; border-radius:3px; padding:0 4px; font-size:12px; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; margin:2px 10px 2px 0; font-size:12px; }
+  .sw { width:12px; height:12px; border-radius:3px; display:inline-block; }
+</style>
+</head>
+<body>
+<header>
+  <b>PROTOTYP · WEGWERF</b>
+  <span>Nur zum Testen des Ablaufs. Grafik, Balance und der Tower sind Platzhalter.</span>
+</header>
+<main>
+  <div id="board">
+    <canvas id="cv"></canvas>
+    <div id="hover">Maus über die Karte bewegen …</div>
+    <div id="banner"></div>
+  </div>
+  <aside>
+    <div class="q"><b>Frage:</b> Fühlt sich der Ablauf <i>Bauen → Welle → Umbauen</i> gut an? Ist das Labyrinth mit nummerierten Checkpoints, festem Wandbudget pro Runde und der Regel „in der Welle gebaut, wirkt erst nächste Runde“ verständlich, und macht es Spaß?</div>
+
+    <h2>Zustand</h2>
+    <div class="grid" id="state"></div>
+
+    <h2>Zuletzt</h2>
+    <div id="last">–</div>
+
+    <h2>Aktionen</h2>
+    <button class="big" id="btnWave">Welle 1 starten <span class="small">(Leertaste)</span></button>
+    <div class="row">
+      <span class="small" style="align-self:center">Werkzeug:</span>
+      <button id="toolWall" class="on">Wand <kbd>W</kbd></button>
+      <button id="toolTower">Tower <kbd>T</kbd></button>
+      <button id="toolErase">Abreißen <kbd>R</kbd></button>
+    </div>
+    <div class="row">
+      <span class="small" style="align-self:center">Tempo:</span>
+      <button data-speed="1" class="on">1×</button><button data-speed="2">2×</button><button data-speed="4">4×</button>
+      <button id="btnPause">Pause <kbd>P</kbd></button>
+    </div>
+    <div class="row"><button id="btnClear">Alle Wände entfernen</button></div>
+    <p class="small">Linksklick oder Ziehen = Werkzeug benutzen. Rechtsklick oder Ziehen = abreißen. Hover zeigt eine Vorschau, wie sich der Weg ändert.</p>
+
+    <h2>Anzeige</h2>
+    <label><input type="checkbox" id="optHeat" checked> Durchläufe anzeigen (Zahlen auf Wänden)</label>
+    <label><input type="checkbox" id="optHeatFree"> Durchläufe auch als Farbkarte auf freien Feldern</label>
+    <label><input type="checkbox" id="optFly" checked> Flugroute anzeigen</label>
+
+    <h2>Karte &amp; Szenarien</h2>
+    <div class="row"><button id="btnRandom">Neue Zufallskarte</button>
+      <input type="text" id="seedIn" placeholder="Seed"><button id="btnSeed">Laden</button></div>
+    <div class="scen"><b>Barrikaden-Trick</b>CP 1 und CP 2 liegen fast nebeneinander. Bau eine Wand-Linie zwischen ihnen bis an den Rand. Dann muss jeder Gegner außen herumlaufen, und die Weglänge springt nach oben.
+      <div class="row"><button id="scenTrick">Szenario laden</button></div></div>
+    <div class="scen"><b>Bauen während der Welle</b>Starte eine Welle und setz dann Wände. Sie erscheinen schraffiert als „geplant“, und der gestrichelte Weg zeigt die nächste Runde. Erst wenn die Welle vorbei ist, gelten sie. Die Gegner laufen bis dahin den alten Weg.</div>
+    <div class="scen"><b>Flieger</b>Jede 5. Welle fliegt direkt von Checkpoint zu Checkpoint (gepunktete blaue Linie) und ignoriert Wände. Hier zählt nur, wo deine Tower stehen.</div>
+
+    <h2>Einstellungen <span class="small">(gelten ab neuer Karte)</span></h2>
+    <label><input type="number" id="setStart" value="12" min="0"> Wände zu Beginn</label>
+    <label><input type="number" id="setPer" value="3" min="0"> neue Wände pro Runde</label>
+    <label><input type="number" id="setRange" value="2.5" step="0.5" min="1"> Tower-Reichweite / Durchlauf-Radius</label>
+    <label><input type="number" id="setDps" value="8" min="1"> Tower-Schaden pro Sekunde</label>
+    <label><input type="number" id="setCost" value="10" min="1"> Tower-Kosten (Gold)</label>
+    <label><input type="number" id="setWaves" value="20" min="1"> Wellen pro Partie</label>
+
+    <h2>Legende</h2>
+    <div class="legend">
+      <span><i class="sw" style="background:#5fd38d"></i>Eingang</span>
+      <span><i class="sw" style="background:#f2b84b"></i>Checkpoint (Reihenfolge)</span>
+      <span><i class="sw" style="background:#ff6b6b"></i>Ausgang</span>
+      <span><i class="sw" style="background:#4a4e58"></i>Fels (Terrain)</span>
+      <span><i class="sw" style="background:#8a7a5c"></i>Wand</span>
+      <span><i class="sw" style="background:repeating-linear-gradient(45deg,#8a7a5c 0 3px,transparent 3px 6px)"></i>geplante Wand</span>
+      <span><i class="sw" style="background:#c9d4ff"></i>Platzhalter-Tower</span>
+    </div>
+    <p class="small"><b>Durchläufe</b> = wie oft der Weg in die Reichweite eines Feldes hineinführt. Genau das macht einen Tower dort stark.</p>
+  </aside>
+</main>
+
+<!-- ============================================================
+     LOGIK-MODUL (rein, ohne DOM). Das ist der Teil, der die Frage beantwortet.
+     ============================================================ -->
+<script>
+const Logic = (() => {
+  const DIRS = [[0,-1],[1,0],[0,1],[-1,0]]; // Gleichstand-Reihenfolge: oben, rechts, unten, links
+  const k = (x,y,W) => y*W + x;
+
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+
+  // Zufallskarte im Stil von Entropy TD: zufällige Größe, Fels-Linien, 2–4 Checkpoints
+  function generateMap(seed) {
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const r = rng(seed * 7919 + attempt);
+      const ri = (a,b) => a + Math.floor(r() * (b - a + 1));
+      const W = ri(16, 24), H = ri(11, 15);
+      const rock = new Uint8Array(W*H);
+      const nLines = ri(Math.round(W*H/45), Math.round(W*H/28));
+      for (let i = 0; i < nLines; i++) {
+        const horiz = r() < 0.5, len = ri(1, 5), x = ri(0, W-1), y = ri(0, H-1);
+        for (let j = 0; j < len; j++) { const xx = horiz ? x+j : x, yy = horiz ? y : y+j; if (xx < W && yy < H) rock[k(xx,yy,W)] = 1; }
+      }
+      const area = W*H;
+      const nCP = area < 220 ? 2 : area < 300 ? ri(2,3) : ri(3,4);
+      const sp = []; let ok = true;
+      for (let s = 0; s < nCP + 2 && ok; s++) {
+        let placed = false;
+        for (let t = 0; t < 400 && !placed; t++) {
+          const x = ri(0, W-1), y = ri(0, H-1);
+          if (rock[k(x,y,W)]) continue;
+          if (sp.some(p => Math.abs(p.x-x) + Math.abs(p.y-y) < 5)) continue;
+          sp.push({x,y}); placed = true;
+        }
+        ok = placed;
+      }
+      if (!ok) continue;
+      const map = { seed, W, H, rock, entrance: sp[0], checkpoints: sp.slice(1, -1), exit: sp[sp.length-1] };
+      if (!findPath(map, new Set())) continue;
+      return map;
+    }
+    throw new Error('Keine gültige Karte gefunden');
+  }
+
+  function handMap(def) { // für Szenarien
+    const rock = new Uint8Array(def.W*def.H);
+    (def.rocks || []).forEach(([x,y]) => rock[k(x,y,def.W)] = 1);
+    return { seed: def.name, W: def.W, H: def.H, rock, entrance: def.entrance, checkpoints: def.checkpoints, exit: def.exit };
+  }
+
+  const specials = map => [map.entrance, ...map.checkpoints, map.exit];
+  const isSpecial = (map,x,y) => specials(map).some(p => p.x === x && p.y === y);
+  const inBounds = (map,x,y) => x >= 0 && y >= 0 && x < map.W && y < map.H;
+
+  // Kürzester Weg (Breitensuche, 4 Richtungen, feste Gleichstand-Regel)
+  function bfs(map, walls, from, to) {
+    const {W,H} = map, prev = new Int32Array(W*H).fill(-1);
+    const s = k(from.x,from.y,W), g = k(to.x,to.y,W), q = [s]; prev[s] = s;
+    for (let h = 0; h < q.length; h++) {
+      const c = q[h]; if (c === g) break;
+      const cx = c % W, cy = (c / W) | 0;
+      for (const [dx,dy] of DIRS) {
+        const nx = cx+dx, ny = cy+dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const n = k(nx,ny,W); if (prev[n] !== -1 || map.rock[n] || walls.has(n)) continue;
+        prev[n] = c; q.push(n);
+      }
+    }
+    if (prev[g] === -1) return null;
+    const out = []; let c = g;
+    while (c !== s) { out.push({x: c % W, y: (c / W) | 0}); c = prev[c]; }
+    out.push({x: from.x, y: from.y}); return out.reverse();
+  }
+
+  // Ganzer Weg: Eingang → CP1 → … → Ausgang. null = blockiert.
+  function findPath(map, walls) {
+    const pts = specials(map), segments = []; let cells = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const seg = bfs(map, walls, pts[i], pts[i+1]); if (!seg) return { blocked: i };
+      segments.push(seg); cells = cells.length ? cells.concat(seg.slice(1)) : seg.slice();
+    }
+    return { cells, segments, length: cells.length - 1 };
+  }
+  const pathOk = p => p && !('blocked' in p);
+
+  function flightRoute(map) { return specials(map).map(p => ({x:p.x, y:p.y})); }
+  function polyLength(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y); return L; }
+
+  // Durchläufe: wie oft führt der Weg in den Radius um ein Feld hinein?
+  function passCounts(map, cells, radius) {
+    const {W,H} = map, r2 = radius*radius, out = new Uint16Array(W*H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let inside = false, n = 0;
+      for (const p of cells) { const d = (p.x-x)**2 + (p.y-y)**2 <= r2; if (d && !inside) n++; inside = d; }
+      out[k(x,y,W)] = n;
+    }
+    return out;
+  }
+
+  const hpBase = n => 12 * Math.pow(1.2, n - 1);
+  function waveInfo(n) {
+    if (n % 10 === 0) return { n, label:'Boss', count:1, hp:Math.round(hpBase(n)*14), speed:1.6, fly:false, gold:15, lifeCost:5, size:.42 };
+    if (n % 5 === 0)  return { n, label:'Flieger', count:8, hp:Math.round(hpBase(n)*.9), speed:2.4, fly:true, gold:1+Math.floor(n/5), lifeCost:1, size:.26 };
+    if (n % 3 === 0)  return { n, label:'Schnell', count:12, hp:Math.round(hpBase(n)*.7), speed:3.4, fly:false, gold:1+Math.floor(n/5), lifeCost:1, size:.22 };
+    return { n, label:'Normal', count:10 + Math.floor(n/2), hp:Math.round(hpBase(n)), speed:2.2, fly:false, gold:1+Math.floor(n/4), lifeCost:1, size:.26 };
+  }
+
+  function newGame(map, settings) {
+    return { map, settings, walls:new Set(), planAdd:new Set(), planRemove:new Set(), towers:new Map(),
+      phase:'bau', wave:0, lives:20, gold:30, kills:0, leaked:0, enemies:[], spawnLeft:0, spawnTimer:0,
+      current:null, route:null, beams:[], nextId:1 };
+  }
+
+  const budget = st => st.settings.startWalls + st.settings.perWave * st.wave;
+  const finalWalls = st => { const s = new Set(st.walls); st.planAdd.forEach(x => s.add(x)); st.planRemove.forEach(x => s.delete(x)); return s; };
+  const wallsUsed = st => finalWalls(st).size;
+  const wallsFree = st => budget(st) - wallsUsed(st);
+
+  function tryPlaceWall(st, x, y) {
+    const {map} = st, key = k(x,y,map.W);
+    if (!inBounds(map,x,y)) return { ok:false };
+    if (st.phase === 'welle' && st.planRemove.has(key)) { st.planRemove.delete(key); return { ok:true, msg:'Geplanter Abriss zurückgenommen.' }; }
+    if (map.rock[key]) return { ok:false, msg:'Hier ist Fels.' };
+    if (isSpecial(map,x,y)) return { ok:false, msg:'Auf Eingang, Ausgang und Checkpoints kann man nicht bauen.' };
+    if (st.walls.has(key) || st.planAdd.has(key)) return { ok:false };
+    if (wallsFree(st) <= 0) return { ok:false, msg:'Keine Wände mehr frei. Nächste Runde gibt es +' + st.settings.perWave + '.' };
+    const test = finalWalls(st); test.add(key);
+    const p = findPath(map, test);
+    if (!pathOk(p)) return { ok:false, msg:'Geht nicht: Das würde den Weg ' + segName(map, p.blocked) + ' komplett blockieren.' };
+    if (st.phase === 'welle') { st.planAdd.add(key); return { ok:true, msg:'Wand geplant. Sie gilt ab der nächsten Runde.' }; }
+    st.walls.add(key); return { ok:true, msg:'Wand gesetzt.' };
+  }
+
+  function tryRemoveWall(st, x, y) {
+    const {map} = st, key = k(x,y,map.W);
+    if (st.planAdd.has(key)) { st.planAdd.delete(key); return { ok:true, msg:'Geplante Wand entfernt.' }; }
+    if (!st.walls.has(key)) return { ok:false };
+    if (st.phase === 'welle') {
+      if (st.planRemove.has(key)) return { ok:false };
+      st.planRemove.add(key); return { ok:true, msg:'Abriss geplant. Die Wand verschwindet nach dieser Welle.' };
+    }
+    st.walls.delete(key);
+    let msg = 'Wand entfernt.';
+    if (st.towers.has(key)) { st.towers.delete(key); st.gold += st.settings.towerCost; msg += ' Tower erstattet.'; }
+    return { ok:true, msg };
+  }
+
+  function tryPlaceTower(st, x, y) {
+    const {map} = st, key = k(x,y,map.W);
+    if (!st.walls.has(key) || st.planRemove.has(key)) return { ok:false, msg:'Tower stehen auf (aktiven) Wänden. Erst eine Wand bauen.' };
+    if (st.towers.has(key)) return { ok:false, msg:'Hier steht schon ein Tower.' };
+    if (st.gold < st.settings.towerCost) return { ok:false, msg:'Zu wenig Gold.' };
+    st.gold -= st.settings.towerCost; st.towers.set(key, {}); return { ok:true, msg:'Tower gebaut (wirkt sofort, ändert den Weg nicht).' };
+  }
+
+  function segName(map, i) {
+    const names = ['Eingang', ...map.checkpoints.map((_,j) => 'CP ' + (j+1)), 'Ausgang'];
+    return names[i] + ' → ' + names[i+1];
+  }
+
+  function clearWalls(st) {
+    if (st.phase !== 'bau') return { ok:false, msg:'Nur in der Bauphase.' };
+    st.towers.forEach(() => st.gold += st.settings.towerCost); st.towers.clear(); st.walls.clear();
+    return { ok:true, msg:'Alle Wände entfernt (Tower erstattet).' };
+  }
+
+  function buildRoute(pts) { const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i-1] + Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y)); return { pts, cum, total: cum[cum.length-1] }; }
+  function posOn(route, d) {
+    const {pts, cum} = route; if (d <= 0) return {...pts[0]};
+    let i = 1; while (i < cum.length && cum[i] < d) i++;
+    if (i >= cum.length) return {...pts[pts.length-1]};
+    const t = (d - cum[i-1]) / (cum[i] - cum[i-1] || 1);
+    return { x: pts[i-1].x + (pts[i].x - pts[i-1].x)*t, y: pts[i-1].y + (pts[i].y - pts[i-1].y)*t };
+  }
+
+  function startWave(st) {
+    if (st.phase !== 'bau') return { ok:false };
+    st.current = waveInfo(st.wave + 1);
+    st.ground = buildRoute(findPath(st.map, st.walls).cells);
+    st.air = buildRoute(flightRoute(st.map));
+    st.phase = 'welle'; st.spawnLeft = st.current.count; st.spawnTimer = 0; st.enemies = []; st.waveKills = 0; st.waveLeaks = 0;
+    return { ok:true, msg:'Welle ' + st.current.n + ' (' + st.current.label + ') läuft. Bauen ist erlaubt, wirkt aber erst nächste Runde.' };
+  }
+
+  function step(st, dt) {
+    st.beams = [];
+    if (st.phase !== 'welle') return null;
+    const w = st.current, S = st.settings;
+    if (st.spawnLeft > 0) {
+      st.spawnTimer -= dt;
+      if (st.spawnTimer <= 0) { st.enemies.push({ id: st.nextId++, hp: w.hp, maxHp: w.hp, d: 0, fly: w.fly }); st.spawnLeft--; st.spawnTimer = w.fly ? .45 : .6; }
+    }
+    for (const e of st.enemies) {
+      e.d += w.speed * dt;
+      const route = e.fly ? st.air : st.ground;
+      e.pos = posOn(route, e.d); e.prog = e.d / route.total;
+      if (e.d >= route.total) { e.done = true; st.lives -= w.lifeCost; st.leaked++; st.waveLeaks++; }
+    }
+    const r2 = S.range * S.range;
+    st.towers.forEach((t, key) => {
+      const tx = key % st.map.W, ty = (key / st.map.W) | 0;
+      let best = null;
+      for (const e of st.enemies) { if (e.done || e.hp <= 0 || !e.pos) continue;
+        if ((e.pos.x-tx)**2 + (e.pos.y-ty)**2 <= r2 && (!best || e.prog > best.prog)) best = e; }
+      if (best) { best.hp -= S.dps * dt; st.beams.push({ x:tx, y:ty, ex:best.pos.x, ey:best.pos.y });
+        if (best.hp <= 0 && !best.dead) { best.dead = true; st.gold += w.gold; st.kills++; st.waveKills++; } }
+    });
+    st.enemies = st.enemies.filter(e => !e.done && !e.dead);
+    if (st.lives <= 0) { st.lives = 0; st.phase = 'verloren'; return { msg:'Verloren in Welle ' + w.n + '.' }; }
+    if (st.spawnLeft === 0 && st.enemies.length === 0) return endWave(st);
+    return null;
+  }
+
+  function endWave(st) {
+    const applied = st.planAdd.size + st.planRemove.size;
+    st.planRemove.forEach(key => { if (st.towers.has(key)) { st.towers.delete(key); st.gold += st.settings.towerCost; } });
+    st.walls = finalWalls(st); st.planAdd.clear(); st.planRemove.clear();
+    st.wave++;
+    st.phase = st.wave >= st.settings.waves ? 'gewonnen' : 'bau';
+    return { msg: 'Welle ' + st.wave + ' vorbei: ' + st.waveKills + ' getötet, ' + st.waveLeaks + ' durchgekommen.'
+      + (applied ? ' ' + applied + ' geplante Änderung(en) übernommen.' : '') + (st.phase === 'bau' ? ' +' + st.settings.perWave + ' Wände.' : ''), ok: true };
+  }
+
+  return { generateMap, handMap, findPath, pathOk, passCounts, flightRoute, polyLength, waveInfo, newGame, budget, wallsFree, finalWalls,
+    tryPlaceWall, tryRemoveWall, tryPlaceTower, clearWalls, startWave, step, isSpecial, segName, key: k };
+})();
+</script>
+
+<!-- ============================================================
+     SEITE (Wegwerf-Hülle: Zeichnen, Eingabe, Panel)
+     ============================================================ -->
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+let st, cell = 32, tool = 'wall', speed = 1, paused = false, hover = null, drag = null, prevView = {};
+let pathCache = null, nextCache = null, passCache = null;
+
+function settings() {
+  return { startWalls: +$('setStart').value, perWave: +$('setPer').value, range: +$('setRange').value,
+    dps: +$('setDps').value, towerCost: +$('setCost').value, waves: +$('setWaves').value };
+}
+function load(map, msg) {
+  st = Logic.newGame(map, settings()); $('seedIn').value = map.seed;
+  recompute(); resize(); say(msg || 'Neue Karte geladen (Seed ' + map.seed + '). Bau dein Labyrinth und starte Welle 1.', 'ok');
+}
+function recompute() {
+  pathCache = Logic.findPath(st.map, st.walls);
+  const hasPlan = st.planAdd.size || st.planRemove.size;
+  nextCache = hasPlan ? Logic.findPath(st.map, Logic.finalWalls(st)) : null;
+  const ref = nextCache && Logic.pathOk(nextCache) && st.phase === 'welle' ? nextCache : pathCache;
+  passCache = Logic.passCounts(st.map, ref.cells, st.settings.range);
+}
+function say(t, cls) { if (!t) return; const el = $('last'); el.textContent = t; el.className = cls || ''; }
+
+function resize() {
+  const b = $('board').getBoundingClientRect();
+  cell = Math.max(14, Math.min(44, Math.floor(Math.min((b.width - 24) / st.map.W, (b.height - 24) / st.map.H))));
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = st.map.W * cell * dpr; cv.height = st.map.H * cell * dpr;
+  cv.style.width = st.map.W * cell + 'px'; cv.style.height = st.map.H * cell + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', () => st && resize());
+
+// ---------- Zeichnen ----------
+const C = p => ({ x: (p.x + .5) * cell, y: (p.y + .5) * cell });
+const segColors = ['#5fd38d', '#f2b84b', '#e9845a', '#c77dff', '#5ab0ff', '#ff6b9a'];
+
+function drawPath(cells, segs, opts) {
+  ctx.save(); ctx.lineWidth = opts.w || 3; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  if (opts.dash) ctx.setLineDash(opts.dash);
+  segs.forEach((seg, i) => {
+    ctx.strokeStyle = opts.color || segColors[i % segColors.length]; ctx.globalAlpha = opts.alpha || .9;
+    ctx.beginPath(); seg.forEach((p, j) => { const c = C(p); j ? ctx.lineTo(c.x, c.y) : ctx.moveTo(c.x, c.y); }); ctx.stroke();
+    if (opts.arrows) { // Pfeile
+      ctx.fillStyle = ctx.strokeStyle;
+      for (let j = 3; j < seg.length; j += 4) { const a = C(seg[j-1]), b = C(seg[j]); const ang = Math.atan2(b.y-a.y, b.x-a.x);
+        ctx.save(); ctx.translate((a.x+b.x)/2, (a.y+b.y)/2); ctx.rotate(ang); ctx.beginPath(); ctx.moveTo(5,0); ctx.lineTo(-4,-4); ctx.lineTo(-4,4); ctx.fill(); ctx.restore(); }
+    }
+  });
+  ctx.restore();
+}
+
+function draw() {
+  const {map} = st, W = map.W, H = map.H;
+  ctx.fillStyle = '#1e2129'; ctx.fillRect(0, 0, W*cell, H*cell);
+  const maxPass = passCache ? Math.max(1, ...passCache) : 1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const key = Logic.key(x,y,W), px = x*cell, py = y*cell;
+    ctx.fillStyle = (x + y) % 2 ? '#22262f' : '#20232b'; ctx.fillRect(px, py, cell, cell);
+    if ($('optHeatFree').checked && passCache[key] && !map.rock[key] && !st.walls.has(key)) {
+      ctx.fillStyle = `rgba(242,184,75,${.08 + .5 * passCache[key] / maxPass})`; ctx.fillRect(px, py, cell, cell);
+    }
+    if (map.rock[key]) { ctx.fillStyle = '#4a4e58'; ctx.fillRect(px+1, py+1, cell-2, cell-2); ctx.fillStyle = '#3d414a'; ctx.fillRect(px+cell*.2, py+cell*.25, cell*.35, cell*.25); }
+    if (st.walls.has(key)) {
+      ctx.fillStyle = st.planRemove.has(key) ? '#5a4f3d' : '#8a7a5c'; ctx.fillRect(px+1, py+1, cell-2, cell-2);
+      ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(px+1, py+1, cell-2, 3);
+      if (st.planRemove.has(key)) { ctx.strokeStyle = '#ff6b6b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px+5,py+5); ctx.lineTo(px+cell-5,py+cell-5); ctx.moveTo(px+cell-5,py+5); ctx.lineTo(px+5,py+cell-5); ctx.stroke(); }
+    }
+    if (st.planAdd.has(key)) {
+      ctx.save(); ctx.beginPath(); ctx.rect(px+1, py+1, cell-2, cell-2); ctx.clip(); ctx.strokeStyle = '#a8977a'; ctx.lineWidth = 2;
+      for (let i = -cell; i < cell*2; i += 6) { ctx.beginPath(); ctx.moveTo(px+i, py); ctx.lineTo(px+i-cell, py+cell); ctx.stroke(); }
+      ctx.restore(); ctx.strokeStyle = '#a8977a'; ctx.setLineDash([3,3]); ctx.strokeRect(px+1.5, py+1.5, cell-3, cell-3); ctx.setLineDash([]);
+    }
+  }
+  // Flugroute
+  if ($('optFly').checked) {
+    const fr = Logic.flightRoute(map); ctx.save(); ctx.strokeStyle = '#7cc7ff'; ctx.globalAlpha = .55; ctx.setLineDash([2,6]); ctx.lineWidth = 2;
+    ctx.beginPath(); fr.forEach((p,i) => { const c = C(p); i ? ctx.lineTo(c.x,c.y) : ctx.moveTo(c.x,c.y); }); ctx.stroke(); ctx.restore();
+  }
+  // Weg (aktuell) und Weg nächste Runde
+  if (Logic.pathOk(pathCache)) drawPath(pathCache.cells, pathCache.segments, { arrows: true });
+  if (nextCache && Logic.pathOk(nextCache)) drawPath(nextCache.cells, nextCache.segments, { color:'#ffffff', dash:[6,5], w:2, alpha:.8 });
+  // Hover-Vorschau
+  if (hover && hover.preview && Logic.pathOk(hover.preview)) drawPath(hover.preview.cells, hover.preview.segments, { color:'#f2b84b', dash:[4,4], w:2, alpha:.85 });
+  // Durchlauf-Zahlen auf Wänden
+  if ($('optHeat').checked) {
+    ctx.font = `600 ${Math.max(9, cell*.36)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    Logic.finalWalls(st).forEach(key => { const n = passCache[key]; if (!n) return; const x = key % W, y = (key / W) | 0;
+      if (st.towers.has(key)) return; ctx.fillStyle = n >= 3 ? '#ffd27a' : '#f1e6cf'; ctx.fillText('×' + n, (x+.5)*cell, (y+.52)*cell); });
+  }
+  // Spezialfelder
+  const sp = [['E', map.entrance, '#5fd38d'], ...map.checkpoints.map((p,i) => [String(i+1), p, '#f2b84b']), ['A', map.exit, '#ff6b6b']];
+  sp.forEach(([t, p, col]) => { const c = C(p); ctx.fillStyle = col; ctx.beginPath(); ctx.arc(c.x, c.y, cell*.42, 0, 7); ctx.fill();
+    ctx.fillStyle = '#14161b'; ctx.font = `800 ${cell*.48}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, c.x, c.y+1); });
+  // Tower
+  st.towers.forEach((t, key) => { const x = key % W, y = (key / W) | 0, c = C({x,y});
+    ctx.fillStyle = '#c9d4ff'; ctx.beginPath(); ctx.arc(c.x, c.y, cell*.3, 0, 7); ctx.fill(); ctx.fillStyle = '#5a6aa8'; ctx.beginPath(); ctx.arc(c.x, c.y, cell*.13, 0, 7); ctx.fill(); });
+  if (hover && (st.towers.has(hover.key) || tool === 'tower')) { const c = C(hover); ctx.strokeStyle = 'rgba(201,212,255,.6)'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.arc(c.x, c.y, st.settings.range*cell, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+  // Schüsse
+  ctx.strokeStyle = 'rgba(201,212,255,.85)'; ctx.lineWidth = 1.5;
+  st.beams.forEach(b => { const a = C(b), e = C({x:b.ex, y:b.ey}); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(e.x, e.y); ctx.stroke(); });
+  // Gegner
+  if (st.current) for (const e of st.enemies) { if (!e.pos) continue; const c = C(e.pos), r = cell * st.current.size;
+    ctx.fillStyle = e.fly ? '#7cc7ff' : st.current.label === 'Boss' ? '#ff4d6d' : st.current.label === 'Schnell' ? '#ffa94d' : '#e05c5c';
+    ctx.beginPath(); if (e.fly) { ctx.moveTo(c.x, c.y-r); ctx.lineTo(c.x+r, c.y+r*.8); ctx.lineTo(c.x-r, c.y+r*.8); ctx.closePath(); } else ctx.arc(c.x, c.y, r, 0, 7); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.fillRect(c.x - cell*.35, c.y - r - 7, cell*.7, 4); ctx.fillStyle = '#5fd38d'; ctx.fillRect(c.x - cell*.35, c.y - r - 7, cell*.7 * Math.max(0, e.hp/e.maxHp), 4); }
+  // Hover-Rahmen
+  if (hover) { ctx.strokeStyle = hover.valid === false ? '#ff6b6b' : hover.valid ? '#5fd38d' : 'rgba(255,255,255,.5)'; ctx.lineWidth = 2; ctx.strokeRect(hover.x*cell+1, hover.y*cell+1, cell-2, cell-2); }
+}
+
+// ---------- Panel ----------
+function renderState() {
+  const p = pathCache, nx = st.wave + 1, wi = Logic.waveInfo(Math.min(nx, st.settings.waves));
+  const fly = Logic.polyLength(Logic.flightRoute(st.map));
+  const phaseTxt = { bau:'Bauphase', welle:'Welle läuft', verloren:'Verloren', gewonnen:'Gewonnen' }[st.phase];
+  const view = {
+    'Phase': phaseTxt,
+    'Welle': st.phase === 'welle' ? st.current.n + ' / ' + st.settings.waves + ' (' + st.current.label + ')' : st.wave + ' / ' + st.settings.waves,
+    'Nächste Welle': st.phase === 'bau' ? wi.label + ' · ' + wi.count + '× · ' + wi.hp + ' LP' + (wi.fly ? ' · fliegt!' : '') : '–',
+    'Leben': st.lives, 'Gold': st.gold,
+    'Wände frei': Logic.wallsFree(st) + ' von ' + Logic.budget(st),
+    'Nächste Runde': '+' + st.settings.perWave + ' Wände',
+    'Weglänge (Boden)': Logic.pathOk(p) ? p.length + ' Felder' : '–',
+    'Weglänge nächste Runde': nextCache && Logic.pathOk(nextCache) ? nextCache.length + ' Felder' : '–',
+    'Flugweg': fly.toFixed(1) + ' Felder',
+    'Bester Durchlauf-Wert': passCache ? '×' + Math.max(0, ...Array.from(Logic.finalWalls(st)).map(k => passCache[k])) + ' (auf Wand)' : '–',
+    'Geplante Änderungen': st.planAdd.size + st.planRemove.size,
+    'Tower': st.towers.size, 'Getötet / durch': st.kills + ' / ' + st.leaked, 'Seed': st.map.seed,
+  };
+  $('state').innerHTML = Object.entries(view).map(([k,v]) => `<div>${k}</div><div class="${prevView[k] !== undefined && prevView[k] !== v ? 'changed' : ''}">${v}</div>`).join('');
+  prevView = view;
+  const b = $('btnWave'); b.disabled = st.phase !== 'bau';
+  b.innerHTML = st.phase === 'bau' ? `Welle ${nx} starten <span class="small">(Leertaste)</span>` : st.phase === 'welle' ? 'Welle läuft …' : st.phase === 'gewonnen' ? 'Gewonnen! Neue Karte?' : 'Verloren. Neue Karte?';
+  const bn = $('banner');
+  if (st.phase === 'welle' && (st.planAdd.size || st.planRemove.size)) { bn.style.display = 'block'; bn.textContent = 'Geplante Änderungen gelten ab der nächsten Runde'; }
+  else if (st.phase === 'gewonnen' || st.phase === 'verloren') { bn.style.display = 'block'; bn.textContent = st.phase === 'gewonnen' ? '🎉 Alle Wellen überstanden' : 'Keine Leben mehr'; }
+  else bn.style.display = 'none';
+}
+
+function hoverText() {
+  if (!hover) return 'Maus über die Karte bewegen …';
+  const {map} = st, key = hover.key, n = passCache[key];
+  let t = `Feld (${hover.x}, ${hover.y}) · Durchläufe hier: <b>×${n}</b>`;
+  if (map.rock[key]) t += ' · Fels';
+  if (st.walls.has(key)) t += ' · Wand' + (st.towers.has(key) ? ' mit Tower' : '');
+  if (hover.preview !== undefined) {
+    if (Logic.pathOk(hover.preview)) { const base = (st.phase === 'welle' && nextCache && Logic.pathOk(nextCache)) ? nextCache.length : pathCache.length;
+      const d = hover.preview.length - base; t += ` · Wand hier: Weg <b style="color:${d>0?'#5fd38d':'#9aa1b2'}">${d>0?'+':''}${d}</b>`; }
+    else if (hover.preview) t += ` · <span style="color:#ff6b6b">blockiert ${Logic.segName(map, hover.preview.blocked)}</span>`;
+  }
+  return t;
+}
+
+// ---------- Eingabe ----------
+function cellAt(ev) { const r = cv.getBoundingClientRect(); const x = Math.floor((ev.clientX - r.left) / cell), y = Math.floor((ev.clientY - r.top) / cell);
+  return (x < 0 || y < 0 || x >= st.map.W || y >= st.map.H) ? null : { x, y, key: Logic.key(x,y,st.map.W) }; }
+
+function updateHover(c) {
+  hover = c; if (!c) return;
+  const {map} = st; hover.preview = undefined; hover.valid = undefined;
+  if (tool === 'wall' && !map.rock[c.key] && !Logic.isSpecial(map,c.x,c.y) && !Logic.finalWalls(st).has(c.key)) {
+    const test = Logic.finalWalls(st); test.add(c.key); hover.preview = Logic.findPath(map, test);
+    hover.valid = Logic.pathOk(hover.preview) && Logic.wallsFree(st) > 0;
+  }
+}
+
+function apply(c, action) {
+  if (!c || st.phase === 'verloren' || st.phase === 'gewonnen') return;
+  const res = action === 'remove' ? Logic.tryRemoveWall(st, c.x, c.y) : tool === 'tower' ? Logic.tryPlaceTower(st, c.x, c.y) : tool === 'erase' ? Logic.tryRemoveWall(st, c.x, c.y) : Logic.tryPlaceWall(st, c.x, c.y);
+  if (res.msg) say(res.msg, res.ok ? 'ok' : 'bad');
+  if (res.ok) { recompute(); updateHover(c); }
+}
+
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('mousedown', e => { const c = cellAt(e); drag = { action: e.button === 2 ? 'remove' : 'use', last: c && c.key }; apply(c, drag.action); });
+window.addEventListener('mouseup', () => drag = null);
+cv.addEventListener('mousemove', e => { const c = cellAt(e);
+  if (drag && c && c.key !== drag.last && tool !== 'tower') { drag.last = c.key; apply(c, drag.action); }
+  if (!hover || !c || hover.key !== c.key) updateHover(c); });
+cv.addEventListener('mouseleave', () => hover = null);
+
+function setTool(t) { tool = t; ['Wall','Tower','Erase'].forEach(n => $('tool'+n).classList.toggle('on', 'tool'+n === 'tool'+t[0].toUpperCase()+t.slice(1))); if (hover) updateHover(hover); }
+$('toolWall').onclick = () => setTool('wall'); $('toolTower').onclick = () => setTool('tower'); $('toolErase').onclick = () => setTool('erase');
+document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { speed = +b.dataset.speed; document.querySelectorAll('[data-speed]').forEach(x => x.classList.toggle('on', x === b)); });
+$('btnPause').onclick = () => { paused = !paused; $('btnPause').classList.toggle('on', paused); };
+$('btnWave').onclick = () => { if (st.phase === 'gewonnen' || st.phase === 'verloren') return newRandom(); const r = Logic.startWave(st); if (r.ok) { say(r.msg, 'ok'); recompute(); } };
+$('btnClear').onclick = () => { const r = Logic.clearWalls(st); say(r.msg, r.ok ? 'ok' : 'bad'); recompute(); };
+function newRandom() { load(Logic.generateMap(Math.floor(Math.random() * 1e6))); }
+$('btnRandom').onclick = newRandom;
+$('btnSeed').onclick = () => { const s = parseInt($('seedIn').value, 10); if (!isNaN(s)) load(Logic.generateMap(s)); };
+['optHeat','optHeatFree','optFly'].forEach(id => $(id).onchange = () => {});
+$('scenTrick').onclick = () => load(Logic.handMap({ name:'trick', W:20, H:12, entrance:{x:1,y:6}, exit:{x:18,y:6},
+  checkpoints:[{x:9,y:3},{x:11,y:3}], rocks:[[5,0],[5,1],[14,10],[14,11]] }),
+  'Szenario „Barrikaden-Trick“: Zieh eine Wand-Linie zwischen CP 1 und CP 2 nach oben und unten. Schau, wie die Weglänge springt.');
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); $('btnWave').click(); }
+  if (e.key === 'w') setTool('wall'); if (e.key === 't') setTool('tower'); if (e.key === 'r') setTool('erase'); if (e.key === 'p') $('btnPause').click();
+  if (e.key === '1' || e.key === '2' || e.key === '4') document.querySelector(`[data-speed="${e.key}"]`).click();
+});
+
+// ---------- Schleife ----------
+let lastT = performance.now();
+function loop(t) {
+  let dt = Math.min(.05, (t - lastT) / 1000); lastT = t;
+  if (!paused && st.phase === 'welle') {
+    let total = dt * speed;
+    while (total > 0) { const h = Math.min(.02, total); total -= h; const r = Logic.step(st, h); if (r) { say(r.msg, st.phase === 'verloren' ? 'bad' : 'ok'); recompute(); if (hover) updateHover(hover); break; } }
+  } else st.beams = [];
+  draw(); renderState(); $('hover').innerHTML = hoverText();
+  requestAnimationFrame(loop);
+}
+newRandom();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
